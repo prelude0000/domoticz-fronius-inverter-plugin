@@ -3,7 +3,7 @@
 #           Author:     ADJ, 2018
 #
 """
-<plugin key="froniusInverter" name="Fronius Inverter" author="ADJ" version="0.0.1" wikilink="https://github.com/aukedejong/domoticz-fronius-inverter-plugin.git" externallink="http://www.fronius.com">
+<plugin key="froniusInverter" name="Fronius Inverter" author="ADJ" version="0.0.2" wikilink="https://github.com/aukedejong/domoticz-fronius-inverter-plugin.git" externallink="http://www.fronius.com">
     <params>
         <param field="Mode1" label="IP Address" required="true" width="200px" />
         <param field="Mode2" label="Device ID" required="true" width="100px" />
@@ -101,36 +101,62 @@ class BasePlugin:
 
         #logDebugMessage("JSON: " + str(jsonData))
 
+
         return jsonObject
 
 
 
     def isInverterActive(self, jsonObject):
 
-        return jsonObject["Head"]["Status"]["Code"] == 0
+#        return jsonObject["Head"]["Status"]["Code"] == 0
+        codeHead = isDictPathExist(jsonObject, '["Head"]["Status"]["Code"]')
+        codeBody = isDictPathExist(jsonObject, '["Body"]["Data"]["DeviceStatus"]["ErrorCode"]')
+        return (codeHead == 0 and codeBody == 0)
 
 
     def logErrorCode(self, jsonObject):
+        codeHead = isDictPathExist(jsonObject, '["Head"]["Status"]["Code"]')
+        codeBody = isDictPathExist(jsonObject, '["Body"]["Data"]["DeviceStatus"]["ErrorCode"]')
 
-        code = jsonObject["Head"]["Status"]["Code"]
-        reason = jsonObject["Head"]["Status"]["Reason"]
-        if (code != 12):
-            logErrorMessage("Code: " + str(code) + ", reason: " + reason)
+
+        #code = jsonObject["Body"]["Data"]["DeviceStatus"]["ErrorCode"]
+        #code = isDictPathExist(jsonObject, '["Body"]["Data"]["DeviceStatus"]["ErrorCode"]')
+
+#        reason = jsonObject["Head"]["Status"]["Reason"]
+        # error coder:
+        # 306 = LOW PV OUTPUT
+        # 307 = DC LOW
+        # 522 = DC1 Input Voltage too low
+        # 523 = DC2 Input Voltage too low
+        # other codes from https://www.fallonsolutions.com.au/solar/information/fronius-inverter-error-codes
+
+        if (codeHead != 12):
+            reason = isDictPathExist(jsonObject, '["Head"]["Status"]["Reason"]')
+            logErrorMessage("Error Code: " + str(codeHead) + ", reason: " + reason)
+
+
+        ignoreErrorCodes = [None, 306, 307, 522, 523]
+        if (codeBody not in ignoreErrorCodes):
+            logErrorMessage("Error Code: " + str(codeBody))
 
         return
 
 
     def updateDeviceCurrent(self, jsonObject):
 
-        currentWatts = jsonObject["Body"]["Data"]["PAC"]["Value"]
-
-        Devices[1].Update(currentWatts, str(currentWatts), Images["FroniusInverter"].ID)
+        currentWatts = isDictPathExist(jsonObject, '["Body"]["Data"]["PAC"]["Value"]')
+        if currentWatts != None:
+          Devices[1].Update(currentWatts, str(currentWatts), Images["FroniusInverter"].ID)
 
         return
 
+
     def updateDeviceMeter(self, jsonObject):
-        totalWh = jsonObject["Body"]["Data"]["TOTAL_ENERGY"]["Value"]
-        currentWatts = jsonObject["Body"]["Data"]["PAC"]["Value"]
+        totalWh = isDictPathExist(jsonObject, '["Body"]["Data"]["TOTAL_ENERGY"]["Value"]')
+        currentWatts = isDictPathExist(jsonObject, '["Body"]["Data"]["PAC"]["Value"]')
+
+        if totalWh == None or currentWatts == None:
+            return
 
         if (self.previousTotalWh < totalWh):
             logDebugMessage("New total recieved: prev:" + str(self.previousTotalWh) + " - new:" + str(totalWh) + " - last faction: " + str(self.whFraction))
@@ -195,3 +221,11 @@ def logErrorMessage(message):
         f.write("ERROR - " + now.isoformat() + " - " + message + "\r\n")
         f.close()
     Domoticz.Error(message)
+
+def isDictPathExist(object, path):
+    try:
+      value = eval("object" + path)
+    except KeyError:
+      value = None
+      logErrorMessage(sys._getframe().f_back.f_code.co_name + ": No key: " + path + " in: " + json.dumps(object))
+    return value
